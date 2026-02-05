@@ -85,8 +85,29 @@ cd /opt/inktime
 ### 2.2 上传项目文件
 
 **方式一：使用 Git（如果项目在 Git 仓库）**
+
+如果项目已经在 Git 仓库中：
 ```bash
 git clone <your-repo-url> .
+```
+
+如果目录已存在且已有 Git 仓库：
+```bash
+# 检查现有 remote
+git remote -v
+
+# 如果 remote origin 已存在，可以：
+# 方案1：更新现有的 remote URL
+git remote set-url origin <your-repo-url>
+
+# 方案2：删除后重新添加
+git remote remove origin
+git remote add origin <your-repo-url>
+
+# 然后拉取代码
+git pull origin main
+# 或
+git pull origin master
 ```
 
 **方式二：使用 SCP 上传**
@@ -103,10 +124,27 @@ rsync -avz /path/to/InkTime/ user@server:/opt/inktime/
 ### 2.3 创建 Python 虚拟环境
 
 ```bash
-cd /opt/inktime
+# 确保在项目根目录
+cd /opt/inktime/InkTime-aliyun  # 或你的实际项目目录
+pwd  # 确认当前目录
+
+# 检查是否已有虚拟环境
+ls -la | grep venv
+
+# 如果不存在，创建虚拟环境
 python3 -m venv venv
+
+# 如果创建成功，激活虚拟环境
 source venv/bin/activate
+
+# 验证激活（命令提示符前应显示 (venv)）
+which python  # 应该显示 venv/bin/python
 ```
+
+**常见问题：**
+- 如果 `source venv/bin/activate` 报错 "No such file or directory"，说明虚拟环境未创建
+- 先执行 `python3 -m venv venv` 创建虚拟环境
+- 确保在项目根目录执行（有 `requirements.txt` 的目录）
 
 ### 2.4 安装 Python 依赖
 

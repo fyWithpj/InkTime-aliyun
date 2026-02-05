@@ -144,6 +144,9 @@ MODEL_NAME = str(
 # API KEY（仍允许用环境变量覆盖）
 API_KEY = str(getattr(cfg, "API_KEY", None) or os.environ.get("LMSTUDIO_API_KEY", ""))
 
+# 图片服务器地址（用于生成图片 URL）
+IMAGE_SERVER_URL = str(getattr(cfg, "IMAGE_SERVER_URL", "http://127.0.0.1:8765") or "http://127.0.0.1:8765")
+
 # 每次处理多少张；None 为不限制
 BATCH_LIMIT = getattr(cfg, "BATCH_LIMIT", None)
 
@@ -181,6 +184,41 @@ def require_exiftool() -> None:
             "       Ubuntu/Debian: sudo apt-get install -y libimage-exiftool-perl\n"
             "       Windows: choco install exiftool"
         )
+
+def get_image_url(path: Path) -> str:
+    """获取图片的 HTTP URL（用于 API 调用）。
+    
+    如果配置了 IMAGE_SERVER_URL 且图片在 IMAGE_DIR 下，返回服务器 URL。
+    否则返回空字符串（将使用 base64 方式）。
+    """
+    try:
+        if IMAGE_SERVER_URL and IMAGE_SERVER_URL.strip():
+            # 计算相对路径
+            rel_path = path.relative_to(IMAGE_DIR.resolve())
+            # 转换为 URL 路径（Windows 路径转 Unix 风格）
+            url_path = str(rel_path).replace("\\", "/")
+            # 构建完整 URL
+            server_url = IMAGE_SERVER_URL.rstrip("/")
+            image_url = f"{server_url}/images/{url_path}"
+            
+            # 可选：验证服务器是否可访问（仅第一次调用时检查）
+            if not hasattr(get_image_url, '_server_checked'):
+                try:
+                    test_resp = requests.get(f"{server_url}/review", timeout=2)
+                    get_image_url._server_checked = True
+                    get_image_url._server_available = test_resp.status_code in (200, 404)
+                except Exception:
+                    get_image_url._server_checked = True
+                    get_image_url._server_available = False
+                    print(f"[WARN] 图片服务器 {server_url} 不可访问，将使用 base64 方式")
+            
+            if getattr(get_image_url, '_server_available', True):
+                return image_url
+    except Exception as e:
+        # 如果路径不在 IMAGE_DIR 下，会抛出异常，返回空字符串
+        pass
+    return ""
+
 
 def encode_image_to_b64(path: Path) -> str:
     """读取图片并（可选）缩放长边后，重新编码为 JPEG，再转 base64。
@@ -359,30 +397,38 @@ def generate_side_caption(image_path: Path) -> str | None:
         "3. 不要出现“这张照片”“这一刻”“那天”等指代照片本身的词。\n"
     )
     user_prompt = "请基于这张照片，生成一句符合规则的中文文案。"
-    try:
-        img_b64 = encode_image_to_b64(image_path)
-    except Exception:
-        return None
+    
+    # 尝试获取图片 URL
+    img_url = get_image_url(image_path)
+    img_b64 = None
+    
+    # 如果没有 URL，则使用 base64
+    if not img_url:
+        try:
+            img_b64 = encode_image_to_b64(image_path)
+        except Exception:
+            return None
 
     headers = {"Content-Type": "application/json"}
     if API_KEY:
         headers["Authorization"] = f"Bearer {API_KEY}"
 
-    # 判断是否为阿里云 DashScope API
-    is_dashscope = "dashscope.aliyuncs.com" in API_URL
+    # 判断是否为阿里云兼容模式 API
+    is_dashscope_compatible = "compatible-mode" in API_URL or "dashscope.aliyuncs.com" in API_URL
     
-    if is_dashscope:
-        # 阿里云 DashScope API 格式
-        payload = {
-            "model": MODEL_NAME,
-            "input": {
+    if is_dashscope_compatible:
+        # 阿里云兼容模式 API 格式
+        if img_url:
+            # 使用 URL 方式
+            payload = {
+                "model": MODEL_NAME,
                 "messages": [
                     {
                         "role": "user",
                         "content": [
                             {
-                                "type": "image",
-                                "image": f"data:image/jpeg;base64,{img_b64}"
+                                "type": "image_url",
+                                "image_url": {"url": img_url}
                             },
                             {
                                 "type": "text",
@@ -390,15 +436,38 @@ def generate_side_caption(image_path: Path) -> str | None:
                             }
                         ]
                     }
-                ]
-            },
-            "parameters": {
+                ],
                 "temperature": 0.7,
                 "max_tokens": 64
             }
-        }
+        else:
+            # 兜底：使用 base64
+            if not img_b64:
+                return None
+            payload = {
+                "model": MODEL_NAME,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}
+                            },
+                            {
+                                "type": "text",
+                                "text": f"{system_prompt}\n\n{user_prompt}"
+                            }
+                        ]
+                    }
+                ],
+                "temperature": 0.7,
+                "max_tokens": 64
+            }
     else:
         # OpenAI 兼容格式（LM Studio）
+        if not img_b64:
+            img_b64 = encode_image_to_b64(image_path)
         payload = {
             "model": MODEL_NAME,
             "messages": [
@@ -430,9 +499,9 @@ def generate_side_caption(image_path: Path) -> str | None:
 
     try:
         data = resp.json()
-        if is_dashscope:
-            # 阿里云 DashScope 响应格式
-            content = data["output"]["choices"][0]["message"]["content"][0]["text"]
+        if is_dashscope_compatible:
+            # 阿里云兼容模式响应格式（类似 OpenAI）
+            content = data["choices"][0]["message"]["content"]
         else:
             # OpenAI 兼容格式
             content = data["choices"][0]["message"]["content"]
@@ -722,10 +791,16 @@ def get_city_resolver():
 
 
 def call_vlm(image_path: Path) -> dict:
-    try:
-        img_b64 = encode_image_to_b64(image_path)
-    except Exception as e:
-        raise RuntimeError(f"读取图片失败：{e}")
+    # 尝试获取图片 URL
+    img_url = get_image_url(image_path)
+    img_b64 = None
+    
+    # 如果没有 URL，则使用 base64（作为兜底）
+    if not img_url:
+        try:
+            img_b64 = encode_image_to_b64(image_path)
+        except Exception as e:
+            raise RuntimeError(f"读取图片失败：{e}")
 
     exif_info = read_exif(image_path)
     exif_json = json.dumps(exif_info, ensure_ascii=False, default=str)
@@ -787,21 +862,22 @@ def call_vlm(image_path: Path) -> dict:
     if API_KEY:
         headers["Authorization"] = f"Bearer {API_KEY}"
 
-    # 判断是否为阿里云 DashScope API
-    is_dashscope = "dashscope.aliyuncs.com" in API_URL
+    # 判断是否为阿里云兼容模式 API
+    is_dashscope_compatible = "compatible-mode" in API_URL or "dashscope.aliyuncs.com" in API_URL
     
-    if is_dashscope:
-        # 阿里云 DashScope API 格式
-        payload = {
-            "model": MODEL_NAME,
-            "input": {
+    if is_dashscope_compatible:
+        # 阿里云兼容模式 API 格式（类似 OpenAI）
+        if img_url:
+            # 使用 URL 方式
+            payload = {
+                "model": MODEL_NAME,
                 "messages": [
                     {
                         "role": "user",
                         "content": [
                             {
-                                "type": "image",
-                                "image": f"data:image/jpeg;base64,{img_b64}"
+                                "type": "image_url",
+                                "image_url": {"url": img_url}
                             },
                             {
                                 "type": "text",
@@ -809,14 +885,36 @@ def call_vlm(image_path: Path) -> dict:
                             }
                         ]
                     }
-                ]
-            },
-            "parameters": {
+                ],
                 "temperature": 0.2
             }
-        }
+        else:
+            # 兜底：使用 base64（如果 URL 不可用）
+            if not img_b64:
+                raise RuntimeError("无法获取图片 URL 或 base64")
+            payload = {
+                "model": MODEL_NAME,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}
+                            },
+                            {
+                                "type": "text",
+                                "text": f"{system_prompt}\n\n{user_text}"
+                            }
+                        ]
+                    }
+                ],
+                "temperature": 0.2
+            }
     else:
         # OpenAI 兼容格式（LM Studio）
+        if not img_b64:
+            img_b64 = encode_image_to_b64(image_path)
         payload = {
             "model": MODEL_NAME,
             "messages": [
@@ -846,9 +944,9 @@ def call_vlm(image_path: Path) -> dict:
 
     data = resp.json()
     try:
-        if is_dashscope:
-            # 阿里云 DashScope 响应格式
-            content = data["output"]["choices"][0]["message"]["content"][0]["text"].strip()
+        if is_dashscope_compatible:
+            # 阿里云兼容模式响应格式（类似 OpenAI）
+            content = data["choices"][0]["message"]["content"].strip()
         else:
             # OpenAI 兼容格式
             content = data["choices"][0]["message"]["content"].strip()
@@ -951,6 +1049,16 @@ def main():
         (image_dir_prefix + "%",),
     ).fetchone()[0]
     print(f"[INFO] 数据库中已有 {counted} 张已分析照片（仅统计当前目录）。")
+
+    # 检查图片服务器是否可用（如果配置了）
+    if IMAGE_SERVER_URL and IMAGE_SERVER_URL.strip():
+        try:
+            test_resp = requests.get(f"{IMAGE_SERVER_URL.rstrip('/')}/review", timeout=2)
+            print(f"[INFO] 图片服务器可用: {IMAGE_SERVER_URL}，将使用 URL 方式发送图片")
+        except Exception as e:
+            print(f"[WARN] 图片服务器 {IMAGE_SERVER_URL} 不可访问: {e}")
+            print(f"[WARN] 请确保 server.py 已启动（python3 server.py），或修改 IMAGE_SERVER_URL 配置")
+            print(f"[WARN] 将尝试使用 base64 方式（某些 API 可能不支持）")
 
     target_paths = filter_unscored(conn, imgs)
     if not target_paths:

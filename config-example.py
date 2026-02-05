@@ -30,10 +30,17 @@ NAS_RETRY_SLEEP_SEC = 2.0    # 每次重试间隔（秒）
 DB_PATH = "./photos.db"
 
 # VLM 模型接口配置
-# 阿里云通义千问 DashScope API
-API_URL = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
-MODEL_NAME = "qwen-vl-flash"  # 或 qwen-vl-max, qwen-vl-plus
+# 阿里云通义千问 DashScope API（兼容模式）
+# 北京地域（默认）
+API_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+# 弗吉尼亚地域：https://dashscope-us.aliyuncs.com/compatible-mode/v1/chat/completions
+# 新加坡地域：https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions
+MODEL_NAME = "qwen-vl-plus"  # 或 qwen-vl-max, qwen-vl-flash
 API_KEY = "sk-ae38e35b76744da8a831b8b2b88ef9f4"
+
+# 图片服务器地址（用于生成图片 URL，如果 server.py 在运行）
+# 如果为空，将尝试使用 base64（某些 API 可能不支持）
+IMAGE_SERVER_URL = "http://8.159.152.155:8765"  # 或你的服务器地址
 
 # 注意：如果使用本地 LM Studio，请使用以下配置：
 # API_URL = "http://127.0.0.1:1234/v1/chat/completions"

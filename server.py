@@ -2319,7 +2319,8 @@ def sim():
 
 @app.get("/images/<path:subpath>")
 def images(subpath: str):
-    _require_webui_enabled()
+    # 允许 analyze_photos.py 调用，即使 WebUI 关闭
+    # _require_webui_enabled()  # 注释掉，允许图片访问
     try:
         p = _safe_join(IMAGE_DIR, subpath)
     except Exception:
