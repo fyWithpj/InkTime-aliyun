@@ -368,26 +368,57 @@ def generate_side_caption(image_path: Path) -> str | None:
     if API_KEY:
         headers["Authorization"] = f"Bearer {API_KEY}"
 
-    payload = {
-        "model": MODEL_NAME,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": user_prompt},
+    # 判断是否为阿里云 DashScope API
+    is_dashscope = "dashscope.aliyuncs.com" in API_URL
+    
+    if is_dashscope:
+        # 阿里云 DashScope API 格式
+        payload = {
+            "model": MODEL_NAME,
+            "input": {
+                "messages": [
                     {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"},
-                    },
-                ],
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image",
+                                "image": f"data:image/jpeg;base64,{img_b64}"
+                            },
+                            {
+                                "type": "text",
+                                "text": f"{system_prompt}\n\n{user_prompt}"
+                            }
+                        ]
+                    }
+                ]
             },
-        ],
-        "temperature": 0.7,
-        "max_tokens": 64,
-        "top_p": 0.9,
-        "stream": False,
-    }
+            "parameters": {
+                "temperature": 0.7,
+                "max_tokens": 64
+            }
+        }
+    else:
+        # OpenAI 兼容格式（LM Studio）
+        payload = {
+            "model": MODEL_NAME,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": user_prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"},
+                        },
+                    ],
+                },
+            ],
+            "temperature": 0.7,
+            "max_tokens": 64,
+            "top_p": 0.9,
+            "stream": False,
+        }
 
     try:
         resp = requests.post(API_URL, headers=headers, json=payload, timeout=min(120, TIMEOUT))
@@ -399,7 +430,12 @@ def generate_side_caption(image_path: Path) -> str | None:
 
     try:
         data = resp.json()
-        content = data["choices"][0]["message"]["content"]
+        if is_dashscope:
+            # 阿里云 DashScope 响应格式
+            content = data["output"]["choices"][0]["message"]["content"][0]["text"]
+        else:
+            # OpenAI 兼容格式
+            content = data["choices"][0]["message"]["content"]
     except Exception:
         return None
 
@@ -751,39 +787,74 @@ def call_vlm(image_path: Path) -> dict:
     if API_KEY:
         headers["Authorization"] = f"Bearer {API_KEY}"
 
-    payload = {
-        "model": MODEL_NAME,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": user_text},
+    # 判断是否为阿里云 DashScope API
+    is_dashscope = "dashscope.aliyuncs.com" in API_URL
+    
+    if is_dashscope:
+        # 阿里云 DashScope API 格式
+        payload = {
+            "model": MODEL_NAME,
+            "input": {
+                "messages": [
                     {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{img_b64}"
-                        },
-                    },
-                ],
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image",
+                                "image": f"data:image/jpeg;base64,{img_b64}"
+                            },
+                            {
+                                "type": "text",
+                                "text": f"{system_prompt}\n\n{user_text}"
+                            }
+                        ]
+                    }
+                ]
             },
-        ],
-        "temperature": 0.2,
-        "stream": False,
-    }
+            "parameters": {
+                "temperature": 0.2
+            }
+        }
+    else:
+        # OpenAI 兼容格式（LM Studio）
+        payload = {
+            "model": MODEL_NAME,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": user_text},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{img_b64}"
+                            },
+                        },
+                    ],
+                },
+            ],
+            "temperature": 0.2,
+            "stream": False,
+        }
 
     resp = requests.post(API_URL, headers=headers, json=payload, timeout=TIMEOUT)
     if not resp.ok:
         print("HTTP:", resp.status_code)
         print(resp.text)
-        raise RuntimeError(f"LM Studio 请求失败: HTTP {resp.status_code}")
+        raise RuntimeError(f"VLM API 请求失败: HTTP {resp.status_code}")
 
     data = resp.json()
     try:
-        content = data["choices"][0]["message"]["content"].strip()
+        if is_dashscope:
+            # 阿里云 DashScope 响应格式
+            content = data["output"]["choices"][0]["message"]["content"][0]["text"].strip()
+        else:
+            # OpenAI 兼容格式
+            content = data["choices"][0]["message"]["content"].strip()
     except Exception:
         print("[DEBUG] 返回内容：", data)
-        raise RuntimeError("解析失败：无法从 choices[0].message.content 读取内容")
+        raise RuntimeError("解析失败：无法从响应中读取内容")
 
     # content 应该是 JSON 字符串
     try:

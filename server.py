@@ -735,6 +735,7 @@ def build_html(rows, page: int, page_size: int, total_count: int):
       </label>
       <button type="button" id="randomDateBtn">随机一天</button>
       <button type="button" id="homeBtn">回到首页</button>
+      <a href="/config" style="padding: 7px 12px; font-size: 13px; text-decoration: none; color: var(--text); background: rgba(255,255,255,0.10); border: 1px solid rgba(255,255,255,0.16); border-radius: 10px; transition: all 0.15s ease; display: inline-block;">配置管理</a>
     </div>
 
     <div class="controls pager" style="justify-content: space-between;">
@@ -1861,6 +1862,347 @@ def build_simulator_html(sim_rows, selected_img: str = ""):
 
 
 # --------------------------
+# Config management
+# --------------------------
+
+def get_config_values() -> dict:
+    """获取当前配置值"""
+    return {
+        "IMAGE_DIR": str(getattr(cfg, "IMAGE_DIR", "") or ""),
+        "NAS_MOUNT_URL": str(getattr(cfg, "NAS_MOUNT_URL", "") or ""),
+        "NAS_MOUNT_POINT": str(getattr(cfg, "NAS_MOUNT_POINT", "/Volumes/photo") or "/Volumes/photo"),
+        "API_URL": str(getattr(cfg, "API_URL", "") or ""),
+        "MODEL_NAME": str(getattr(cfg, "MODEL_NAME", "") or ""),
+        "API_KEY": str(getattr(cfg, "API_KEY", "") or ""),
+        "HOME_LAT": float(getattr(cfg, "HOME_LAT", 22.543096) or 22.543096),
+        "HOME_LON": float(getattr(cfg, "HOME_LON", 114.057865) or 114.057865),
+    }
+
+
+def save_config_values(values: dict) -> tuple[bool, str]:
+    """保存配置值到 config.py"""
+    config_path = ROOT_DIR / "config.py"
+    if not config_path.exists():
+        return False, "config.py 文件不存在，请先复制 config-example.py 为 config.py"
+    
+    try:
+        # 读取现有配置
+        content = config_path.read_text(encoding="utf-8")
+        
+        # 更新配置值（使用正则表达式替换）
+        import re
+        
+        # IMAGE_DIR - 支持字符串和路径
+        if "IMAGE_DIR" in values:
+            pattern = r'^IMAGE_DIR\s*=\s*["\'].*?["\']'
+            replacement = f'IMAGE_DIR = {repr(str(values["IMAGE_DIR"]))}'
+            content = re.sub(pattern, replacement, content, flags=re.MULTILINE)
+        
+        # NAS_MOUNT_URL
+        if "NAS_MOUNT_URL" in values:
+            pattern = r'^NAS_MOUNT_URL\s*=\s*["\'].*?["\']'
+            replacement = f'NAS_MOUNT_URL = {repr(str(values["NAS_MOUNT_URL"]))}'
+            content = re.sub(pattern, replacement, content, flags=re.MULTILINE)
+        
+        # NAS_MOUNT_POINT
+        if "NAS_MOUNT_POINT" in values:
+            pattern = r'^NAS_MOUNT_POINT\s*=\s*["\'].*?["\']'
+            replacement = f'NAS_MOUNT_POINT = {repr(str(values["NAS_MOUNT_POINT"]))}'
+            content = re.sub(pattern, replacement, content, flags=re.MULTILINE)
+        
+        # API_URL
+        if "API_URL" in values:
+            pattern = r'^API_URL\s*=\s*["\'].*?["\']'
+            replacement = f'API_URL = {repr(str(values["API_URL"]))}'
+            content = re.sub(pattern, replacement, content, flags=re.MULTILINE)
+        
+        # MODEL_NAME
+        if "MODEL_NAME" in values:
+            pattern = r'^MODEL_NAME\s*=\s*["\'].*?["\']'
+            replacement = f'MODEL_NAME = {repr(str(values["MODEL_NAME"]))}'
+            content = re.sub(pattern, replacement, content, flags=re.MULTILINE)
+        
+        # API_KEY
+        if "API_KEY" in values:
+            pattern = r'^API_KEY\s*=\s*["\'].*?["\']'
+            replacement = f'API_KEY = {repr(str(values["API_KEY"]))}'
+            content = re.sub(pattern, replacement, content, flags=re.MULTILINE)
+        
+        # HOME_LAT - 支持浮点数
+        if "HOME_LAT" in values:
+            try:
+                lat_val = float(values["HOME_LAT"])
+                pattern = r'^HOME_LAT\s*=\s*[\d.]+'
+                replacement = f'HOME_LAT = {lat_val}'
+                content = re.sub(pattern, replacement, content, flags=re.MULTILINE)
+            except (ValueError, TypeError):
+                pass
+        
+        # HOME_LON - 支持浮点数
+        if "HOME_LON" in values:
+            try:
+                lon_val = float(values["HOME_LON"])
+                pattern = r'^HOME_LON\s*=\s*[\d.]+'
+                replacement = f'HOME_LON = {lon_val}'
+                content = re.sub(pattern, replacement, content, flags=re.MULTILINE)
+            except (ValueError, TypeError):
+                pass
+        
+        # 写入文件
+        config_path.write_text(content, encoding="utf-8")
+        return True, "配置已保存，请重启服务使配置生效"
+    except Exception as e:
+        return False, f"保存失败: {str(e)}"
+
+
+def build_config_html() -> str:
+    """构建配置页面 HTML"""
+    config_vals = get_config_values()
+    
+    html_str = f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>InkTime 配置管理</title>
+  <style>
+    :root{{
+      --bg: #0b0c10;
+      --panel: rgba(255,255,255,0.06);
+      --card: rgba(255,255,255,0.10);
+      --text: rgba(255,255,255,0.92);
+      --muted: rgba(255,255,255,0.62);
+      --accent: #8ab4ff;
+      --shadow: 0 18px 60px rgba(0,0,0,0.45);
+      --radius: 14px;
+    }}
+    body{{
+      margin:0;
+      padding:0;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+      background: radial-gradient(1200px 800px at 20% 0%, rgba(138,180,255,0.18), transparent 45%),
+                  radial-gradient(900px 700px at 90% 20%, rgba(156,255,214,0.14), transparent 55%),
+                  linear-gradient(180deg, #07080b 0%, #0b0c10 40%, #0b0c10 100%);
+      color: var(--text);
+    }}
+    .container{{
+      max-width: 900px;
+      margin: 26px auto 60px;
+      padding: 0 18px;
+    }}
+    h1{{
+      font-size: 22px;
+      margin: 0 0 8px;
+      letter-spacing: 0.2px;
+    }}
+    .back-link{{
+      display:inline-block;
+      margin-bottom: 10px;
+      color: var(--accent);
+      text-decoration: none;
+    }}
+    .form-group{{
+      background: var(--panel);
+      border: 1px solid rgba(255,255,255,0.14);
+      border-radius: var(--radius);
+      padding: 16px;
+      margin-bottom: 16px;
+      box-shadow: var(--shadow);
+    }}
+    .form-group label{{
+      display:block;
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 8px;
+      font-weight: 500;
+    }}
+    .form-group input[type="text"],
+    .form-group input[type="number"]{{
+      width: 100%;
+      padding: 10px 12px;
+      font-size: 14px;
+      color: var(--text);
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.16);
+      border-radius: 10px;
+      outline: none;
+      box-sizing: border-box;
+    }}
+    .form-group input:focus{{
+      border-color: rgba(138,180,255,0.7);
+      box-shadow: 0 0 0 3px rgba(138,180,255,0.16);
+    }}
+    .form-group .help{{
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 6px;
+      line-height: 1.4;
+    }}
+    .btn-group{{
+      display:flex;
+      gap: 12px;
+      margin-top: 24px;
+    }}
+    button{{
+      padding: 10px 20px;
+      font-size: 14px;
+      cursor: pointer;
+      color: var(--text);
+      background: rgba(255,255,255,0.10);
+      border: 1px solid rgba(255,255,255,0.16);
+      border-radius: 10px;
+      transition: all 0.15s ease;
+    }}
+    button:hover{{
+      background: rgba(255,255,255,0.14);
+      border-color: rgba(255,255,255,0.26);
+    }}
+    button.primary{{
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #0b0c10;
+    }}
+    button.primary:hover{{
+      background: #9cc4ff;
+    }}
+    .status{{
+      margin-top: 16px;
+      padding: 12px;
+      border-radius: 10px;
+      font-size: 13px;
+      display:none;
+    }}
+    .status.success{{
+      background: rgba(156,255,214,0.15);
+      border: 1px solid rgba(156,255,214,0.3);
+      color: #9cffd6;
+    }}
+    .status.error{{
+      background: rgba(255,100,100,0.15);
+      border: 1px solid rgba(255,100,100,0.3);
+      color: #ff9f9f;
+    }}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <a class="back-link" href="/review">← 返回 Review</a>
+    <h1>InkTime 配置管理</h1>
+    
+    <form id="configForm">
+      <div class="form-group">
+        <label for="IMAGE_DIR">照片库路径 (IMAGE_DIR)</label>
+        <input type="text" id="IMAGE_DIR" name="IMAGE_DIR" value="{html.escape(config_vals["IMAGE_DIR"])}" placeholder="./test">
+        <div class="help">照片库的本地路径，支持相对路径和绝对路径</div>
+      </div>
+      
+      <div class="form-group">
+        <label for="NAS_MOUNT_URL">NAS 挂载 URL (NAS_MOUNT_URL)</label>
+        <input type="text" id="NAS_MOUNT_URL" name="NAS_MOUNT_URL" value="{html.escape(config_vals["NAS_MOUNT_URL"])}" placeholder="smb://192.168.1.100/photo">
+        <div class="help">NAS 网络地址，用于自动重挂载（可选）</div>
+      </div>
+      
+      <div class="form-group">
+        <label for="NAS_MOUNT_POINT">NAS 挂载点 (NAS_MOUNT_POINT)</label>
+        <input type="text" id="NAS_MOUNT_POINT" name="NAS_MOUNT_POINT" value="{html.escape(config_vals["NAS_MOUNT_POINT"])}" placeholder="/Volumes/photo">
+        <div class="help">本地挂载点路径，用于检测挂载状态</div>
+      </div>
+      
+      <div class="form-group">
+        <label for="API_URL">VLM API 地址 (API_URL)</label>
+        <input type="text" id="API_URL" name="API_URL" value="{html.escape(config_vals["API_URL"])}" placeholder="https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation">
+        <div class="help">视觉语言模型的 API 接口地址</div>
+      </div>
+      
+      <div class="form-group">
+        <label for="MODEL_NAME">模型名称 (MODEL_NAME)</label>
+        <input type="text" id="MODEL_NAME" name="MODEL_NAME" value="{html.escape(config_vals["MODEL_NAME"])}" placeholder="qwen-vl-flash">
+        <div class="help">使用的 VLM 模型名称</div>
+      </div>
+      
+      <div class="form-group">
+        <label for="API_KEY">API Key (API_KEY)</label>
+        <input type="text" id="API_KEY" name="API_KEY" value="{html.escape(config_vals["API_KEY"])}" placeholder="sk-...">
+        <div class="help">API 密钥（敏感信息，请妥善保管）</div>
+      </div>
+      
+      <div class="form-group">
+        <label for="HOME_LAT">常驻地纬度 (HOME_LAT)</label>
+        <input type="number" id="HOME_LAT" name="HOME_LAT" value="{config_vals["HOME_LAT"]}" step="0.000001" placeholder="22.543096">
+        <div class="help">用于判断是否为旅行照片的参考纬度</div>
+      </div>
+      
+      <div class="form-group">
+        <label for="HOME_LON">常驻地经度 (HOME_LON)</label>
+        <input type="number" id="HOME_LON" name="HOME_LON" value="{config_vals["HOME_LON"]}" step="0.000001" placeholder="114.057865">
+        <div class="help">用于判断是否为旅行照片的参考经度</div>
+      </div>
+      
+      <div class="btn-group">
+        <button type="submit" class="primary">保存配置</button>
+        <button type="button" id="resetBtn">重置为当前值</button>
+      </div>
+      
+      <div id="status" class="status"></div>
+    </form>
+  </div>
+  
+  <script>
+    const form = document.getElementById('configForm');
+    const status = document.getElementById('status');
+    const resetBtn = document.getElementById('resetBtn');
+    
+    function showStatus(message, isError = false) {{
+      status.textContent = message;
+      status.className = 'status ' + (isError ? 'error' : 'success');
+      status.style.display = 'block';
+      setTimeout(() => {{
+        status.style.display = 'none';
+      }}, 5000);
+    }}
+    
+    form.addEventListener('submit', async (e) => {{
+      e.preventDefault();
+      
+      const formData = new FormData(form);
+      const data = {{}};
+      for (const [key, value] of formData.entries()) {{
+        if (key === 'HOME_LAT' || key === 'HOME_LON') {{
+          data[key] = parseFloat(value);
+        }} else {{
+          data[key] = value;
+        }}
+      }}
+      
+      try {{
+        const resp = await fetch('/api/config/save', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify(data)
+        }});
+        
+        const result = await resp.json();
+        if (result.success) {{
+          showStatus('配置已保存成功！请重启服务使配置生效。', false);
+        }} else {{
+          showStatus('保存失败: ' + result.message, true);
+        }}
+      }} catch (error) {{
+        showStatus('请求失败: ' + error.message, true);
+      }}
+    }});
+    
+    resetBtn.addEventListener('click', () => {{
+      if (confirm('确定要重置为当前配置值吗？')) {{
+        location.reload();
+      }}
+    }});
+  </script>
+</body>
+</html>"""
+    return html_str
+
+
+# --------------------------
 # Routes
 # --------------------------
 
@@ -1900,6 +2242,45 @@ def api_md_list():
     _require_webui_enabled()
     md_list = _load_all_md_list()
     return Response(json.dumps(md_list, ensure_ascii=False), mimetype='application/json; charset=utf-8')
+
+
+@app.get("/config")
+def config_page():
+    _require_webui_enabled()
+    html_str = build_config_html()
+    return Response(html_str, mimetype="text/html; charset=utf-8")
+
+
+@app.get("/api/config")
+def api_get_config():
+    _require_webui_enabled()
+    config_vals = get_config_values()
+    return Response(json.dumps(config_vals, ensure_ascii=False), mimetype='application/json; charset=utf-8')
+
+
+@app.post("/api/config/save")
+def api_save_config():
+    _require_webui_enabled()
+    try:
+        data = request.get_json()
+        if not data:
+            return Response(
+                json.dumps({"success": False, "message": "无效的请求数据"}, ensure_ascii=False),
+                mimetype='application/json; charset=utf-8',
+                status=400
+            )
+        
+        success, message = save_config_values(data)
+        return Response(
+            json.dumps({"success": success, "message": message}, ensure_ascii=False),
+            mimetype='application/json; charset=utf-8'
+        )
+    except Exception as e:
+        return Response(
+            json.dumps({"success": False, "message": str(e)}, ensure_ascii=False),
+            mimetype='application/json; charset=utf-8',
+            status=500
+        )
 
 
 @app.get("/sim")
